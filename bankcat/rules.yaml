@@ -1,0 +1,733 @@
+# Merchant / keyword dictionary for Indian bank statements.
+#
+# Each pattern is a case-insensitive regular expression matched against both the cleaned
+# merchant name and the full raw narration. When several patterns match a transaction the
+# LONGEST pattern wins, so a specific rule always beats a general one — "amazon prime"
+# lands in Entertainment even though "amazon" is listed under Shopping.
+#
+# To teach the tool a new merchant, add a line here. No code change is needed; the app
+# picks it up on the next reload. Keep patterns lowercase and specific enough not to
+# collide (prefer "big bazaar" over "big").
+
+Food & Dining:
+  - xero degrees
+  - chaipoint
+  - wow momo
+  - la pinoz
+  - burger singh
+  - rolls mania
+  - momo
+  - chappan bhog
+  - bikaner
+  - halwai
+  - sweet
+  - dhaba
+  - tiffin
+  - canteen
+  - bhojan
+  - swiggy
+  - zomato
+  - eatsure
+  - eatfit
+  - faasos
+  - behrouz
+  - ovenstory
+  - freshmenu
+  - box8
+  - dominos
+  - domino s
+  - pizza hut
+  - pizzahut
+  - papa john
+  - mcdonald
+  - burger king
+  - burgerking
+  - kfc
+  - subway
+  - taco bell
+  - wendy
+  - dunkin
+  - starbucks
+  - cafe coffee day
+  - ccd
+  - costa coffee
+  - barista
+  - chaayos
+  - chai point
+  - third wave coffee
+  - blue tokai
+  - theobroma
+  - baskin
+  - naturals ice
+  - keventers
+  - haldiram
+  - bikanervala
+  - saravana bhavan
+  - barbeque nation
+  - barbecue nation
+  - social offline
+  - toit
+  - truffles
+  - empire restaurant
+  - meghana
+  - nandhini
+  - biryani
+  - restaurant
+  - resto
+  - dhaba
+  - bakery
+  - bakers
+  - sweets
+  - juice
+  - foods
+  - food court
+  - eatery
+  - kitchen
+  - cafe
+  - bar and grill
+  - brewery
+  - dineout
+  - eazydiner
+  - magicpin
+  - hotel.*restaurant
+
+Groceries:
+  - swiggy instama
+  - swiggy insta
+  - blinkit commerce
+  - bigbasket
+  - big basket
+  - blinkit
+  - grofers
+  - zepto
+  - zeptonow
+  - instamart
+  - swiggy instamart
+  - dunzo
+  - dmart
+  - d mart
+  - avenue supermart
+  - reliance fresh
+  - reliance smart
+  - more retail
+  - more supermarket
+  - spencer
+  - star bazaar
+  - nature s basket
+  - naturesbasket
+  - metro cash
+  - licious
+  - fresh to home
+  - freshtohome
+  - country delight
+  - milk basket
+  - milkbasket
+  - amul
+  - mother dairy
+  - nandini milk
+  - heritage fresh
+  - supermarket
+  - super market
+  - kirana
+  - provision store
+  - grocer
+  - vegetable
+  - fruits and
+
+Transport & Fuel:
+  - delhi metro
+  - namma metro
+  - metro railway
+  - mumbai metro
+  - hyderabad metro
+  - uber
+  - uberindia
+  - ola cabs
+  - olacabs
+  - ola money
+  - rapido
+  - namma yatri
+  - blusmart
+  - blu smart
+  - meru
+  - indian oil
+  - indianoil
+  - iocl
+  - bharat petroleum
+  - bharatpetroleum
+  - bpcl
+  - hindustan petroleum
+  - hpcl
+  - hp petrol
+  - shell india
+  - nayara
+  - essar oil
+  - reliance petro
+  - petrol pump
+  - petrol bunk
+  - fuel station
+  - filling station
+  - fastag
+  - paytm fastag
+  - netc fastag
+  - toll plaza
+  - parking
+  - bmtc
+  - bmrcl
+  - dmrc
+  - metro rail
+  - metro recharge
+  - onecard metro
+  - chalo app
+  - redbus
+  - abhibus
+  - yulu
+  - bounce
+  - vogo
+  - zoomcar
+  - revv
+  - drivezy
+
+Shopping:
+  - amazon
+  - amazonpay
+  - amazon pay
+  - flipkart
+  - myntra
+  - ajio
+  - meesho
+  - snapdeal
+  - tata cliq
+  - tatacliq
+  - nykaa
+  - purplle
+  - firstcry
+  - pepperfry
+  - urban ladder
+  - urbanladder
+  - ikea
+  - home centre
+  - homecentre
+  - croma
+  - reliance digital
+  - vijay sales
+  - vijaysales
+  - sangeetha mobile
+  - poorvika
+  - decathlon
+  - lifestyle store
+  - shoppers stop
+  - shoppersstop
+  - westside
+  - pantaloons
+  - max fashion
+  - zara india
+  - h and m
+  - uniqlo
+  - levis
+  - allen solly
+  - van heusen
+  - peter england
+  - louis philippe
+  - bata
+  - metro shoes
+  - nike
+  - adidas
+  - puma
+  - skechers
+  - titan company
+  - tanishq
+  - kalyan jewel
+  - malabar gold
+  - lenskart
+  - titan eye
+  - apple india
+  - apple store
+  - samsung india
+  - oneplus
+  - mi store
+  - xiaomi
+  - boat lifestyle
+  - noise
+  - retail
+  - store
+  - mall
+  - fashion
+  - boutique
+  - electronics
+
+Bills & Utilities:
+  - bescom
+  - mseb
+  - mahadiscom
+  - bses
+  - tata power
+  - adani electricity
+  - torrent power
+  - cesc
+  - tneb
+  - tangedco
+  - kseb
+  - apspdcl
+  - tsspdcl
+  - jbvnl
+  - uppcl
+  - pspcl
+  - dhbvn
+  - electricity
+  - power bill
+  - bwssb
+  - water board
+  - water bill
+  - jal board
+  - gail gas
+  - indraprastha gas
+  - mahanagar gas
+  - gujarat gas
+  - adani gas
+  - hp gas
+  - bharat gas
+  - indane
+  - lpg
+  - piped gas
+  - airtel
+  - jio
+  - reliance jio
+  - vodafone
+  - vi india
+  - idea cellular
+  - bsnl
+  - mtnl
+  - act fibernet
+  - actcorp
+  - hathway
+  - excitel
+  - tikona
+  - you broadband
+  - spectra
+  - tata play
+  - tataplay
+  - dish tv
+  - dishtv
+  - d2h
+  - sun direct
+  - broadband
+  - postpaid
+  - prepaid recharge
+  - mobile recharge
+  - dth
+  - property tax
+  - municipal
+  - bbmp
+  - bmc
+
+Rent & Housing:
+  - rent
+  - rentpay
+  - nobroker
+  - no broker
+  - housing society
+  - maintenance charge
+  - society maintenance
+  - apartment
+  - mygate
+  - adda
+  - nestaway
+  - stanza living
+  - colive
+  - zolo stays
+  - landlord
+  - lease
+  - brokerage
+  - packers and movers
+
+Health & Medical:
+  - max super spec
+  - max super
+  - max hospital
+  - sir ganga ram
+  - medanta
+  - artemis hospital
+  - apollo pharmacy
+  - apollo hospital
+  - apollo 247
+  - medplus
+  - med plus
+  - netmeds
+  - pharmeasy
+  - 1mg
+  - tata 1mg
+  - wellness forever
+  - fortis
+  - manipal hospital
+  - narayana health
+  - max healthcare
+  - aster
+  - columbia asia
+  - cloudnine
+  - rainbow hospital
+  - kims hospital
+  - yashoda
+  - practo
+  - dr lal path
+  - lal pathlabs
+  - metropolis health
+  - thyrocare
+  - srl diagnostic
+  - healthians
+  - redcliffe
+  - pharmacy
+  - chemist
+  - medical store
+  - hospital
+  - clinic
+  - diagnostic
+  - pathology
+  - dental
+  - optical
+  - physiotherapy
+  - cult fit
+  - cultfit
+  - cure fit
+  - curefit
+  - gold s gym
+  - anytime fitness
+  - gym
+
+Entertainment & Subscriptions:
+  - mobile premier league
+  - netflix
+  - amazon prime
+  - primevideo
+  - prime video
+  - hotstar
+  - disney
+  - jiocinema
+  - jio cinema
+  - jiohotstar
+  - sonyliv
+  - sony liv
+  - zee5
+  - voot
+  - alt balaji
+  - aha video
+  - sun nxt
+  - mubi
+  - apple tv
+  - apple music
+  - spotify
+  - gaana
+  - jiosaavn
+  - saavn
+  - wynk
+  - youtube premium
+  - google youtube
+  - audible
+  - kindle
+  - bookmyshow
+  - book my show
+  - district by zomato
+  - pvr
+  - inox
+  - cinepolis
+  - carnival cinema
+  - miraj cinema
+  - cinema
+  - multiplex
+  - playstation
+  - xbox
+  - steam games
+  - steampowered
+  - nintendo
+  - google play
+  - itunes
+  - app store
+  - dream11
+  - mpl
+  - rummy
+
+Travel:
+  - makemytrip
+  - make my trip
+  - goibibo
+  - yatra
+  - cleartrip
+  - easemytrip
+  - ixigo
+  - happyeasygo
+  - booking com
+  - bookingcom
+  - airbnb
+  - agoda
+  - trivago
+  - oyo
+  - treebo
+  - fabhotels
+  - lemon tree
+  - taj hotel
+  - itc hotel
+  - marriott
+  - hyatt
+  - radisson
+  - novotel
+  - irctc
+  - indian railway
+  - indigo
+  - goindigo
+  - air india
+  - vistara
+  - spicejet
+  - akasa air
+  - go first
+  - emirates
+  - qatar airways
+  - lufthansa
+  - singapore air
+  - airlines
+  - airways
+  - visa fee
+  - vfs global
+  - passport seva
+  - forex card
+  - travel
+
+Education:
+  - byju
+  - unacademy
+  - vedantu
+  - toppr
+  - physics wallah
+  - physicswallah
+  - whitehat
+  - cuemath
+  - coursera
+  - udemy
+  - upgrad
+  - simplilearn
+  - great learning
+  - scaler
+  - newton school
+  - masai school
+  - edx
+  - skillshare
+  - duolingo
+  - school fee
+  - college fee
+  - tuition
+  - university
+  - institute
+  - academy
+  - coaching
+  - exam fee
+  - admission fee
+  - library
+
+Insurance:
+  - hdfclife
+  - hdfc life
+  - iciciprulife
+  - icici pru
+  - icici lombard
+  - sbi life
+  - sbilife
+  - lic of india
+  - lic india
+  - life insurance corp
+  - max life
+  - maxlife
+  - bajaj allianz
+  - tata aia
+  - tata aig
+  - kotak life
+  - aditya birla sun life insurance
+  - pnb metlife
+  - star health
+  - niva bupa
+  - care health
+  - religare health
+  - acko
+  - digit insurance
+  - godigit
+  - policybazaar
+  - policy bazaar
+  - reliance general
+  - new india assurance
+  - united india insurance
+  - oriental insurance
+  - insurance
+  - premium payment
+  - mediclaim
+
+Investments & SIP:
+  - mutual fund
+  - mutualfund
+  - mf sip
+  - sip
+  - systematic investment
+  - zerodha
+  - groww
+  - upstox
+  - angel one
+  - angelone
+  - icici direct
+  - icicidirect
+  - hdfc securities
+  - kotak securities
+  - motilal oswal
+  - sharekhan
+  - 5paisa
+  - dhan
+  - indmoney
+  - ind money
+  - smallcase
+  - kuvera
+  - coin zerodha
+  - paytm money
+  - nsdl
+  - cdsl
+  - bse star
+  - nse clearing
+  - indian clearing corp
+  - icclbse
+  - axis mutual
+  - sbi mutual
+  - hdfc mutual
+  - icici prudential mutual
+  - nippon india mutual
+  - kotak mahindra mutual
+  - uti mutual
+  - parag parikh
+  - quant mutual
+  - mirae asset
+  - dsp mutual
+  - edelweiss mutual
+  - ppf
+  - public provident
+  - nps
+  - national pension
+  - sukanya
+  - recurring deposit
+  - fixed deposit
+  - term deposit
+  - rd instalment
+  - gold bond
+  - sgb
+  - etf
+  - demat
+
+Loan & EMI:
+  - emi
+  - loan
+  - equated monthly
+  - bajaj finserv
+  - bajajfinance
+  - bajaj finance
+  - hdb financial
+  - tata capital
+  - l and t finance
+  - fullerton
+  - iifl finance
+  - muthoot
+  - manappuram
+  - home loan
+  - car loan
+  - personal loan
+  - education loan
+  - gold loan
+  - two wheeler loan
+  - loan repayment
+  - principal repayment
+  - interest repayment
+  - simpl
+  - lazypay
+  - slice
+  - kreditbee
+  - moneyview
+  - navi
+  - cred pay
+  - zestmoney
+
+Fees & Charges:
+  - minimum balance charge
+  - amb chrg
+  - non maintenance
+  - sms alert charge
+  - sms chg
+  - annual fee
+  - debit card fee
+  - card annual
+  - atm decline
+  - cash handling
+  - cheque return
+  - cheque bounce
+  - ecs return
+  - nach return
+  - penal charge
+  - late payment fee
+  - processing fee
+  - service charge
+  - convenience fee
+  - gst on
+  - igst
+  - cgst
+  - sgst
+  - tds deducted
+  - stamp duty
+  - locker rent
+  - dd charges
+  - neft charges
+  - imps charges
+  - rtgs charges
+
+Cash Withdrawal:
+  - atm withdrawal
+  - cash withdrawal
+  - cash wdl
+  - self cash
+  - atm cash
+  - cash deposit
+
+Transfers:
+  - self
+  - own ac
+  - acct transfer
+  - credit card payment
+  - cc payment
+  - card bill pay
+  - cred club
+  - cred
+  - transfer to self
+  - self savings
+  - self transfer
+  - own account
+  - fund transfer
+  - tpt transfer
+  - to own ac
+  - sweep out
+  - sweep in
+  - auto sweep
+  - linked account
+
+Income:
+  - salary
+  - sal cr
+  - salary credit
+  - payroll
+  - interest credited
+  - int pd
+  - credit interest
+  - dividend
+  - refund
+  - reversal
+  - cashback
+  - reimbursement
+  - bonus
+  - incentive
+  - freelance
+  - consulting fee
+  - professional fee
+  - rent received
+  - maturity proceeds
+  - redemption
+  - income tax refund
+  - itr refund
