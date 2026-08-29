@@ -7,3 +7,4 @@ plotly>=5.24
 PyYAML>=6.0
 python-dateutil>=2.9
 anthropic>=0.40
+supabase>=2.0

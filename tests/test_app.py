@@ -48,7 +48,9 @@ def main() -> int:
         return 1
 
     print("Empty state")
-    app = AppTest.from_file(APP, default_timeout=90).run()
+    app = AppTest.from_file(APP, default_timeout=90)
+    app.session_state["password_correct"] = True
+    app.run()
     check("renders with no upload", report_exceptions(app, "empty"))
     check("shows the drop zone", len(app.get("file_uploader")) == 1)
     check("offers the sample", any("sample" in b.label.lower() for b in app.button))

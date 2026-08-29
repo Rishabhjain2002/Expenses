@@ -164,18 +164,51 @@ def _write_json(path: str, data: dict) -> None:
     os.replace(temporary, path)
 
 
+def is_supabase_configured() -> bool:
+    """True when Supabase credentials are present in the environment."""
+    return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_KEY"))
+
+
 class Store:
-    """The two JSON files that make month two smarter than month one."""
+    """What you tagged and what Claude has learned — the reason month two is smarter
+    than month one.
+
+    Backed by local JSON files (`data/`) by default. When `SUPABASE_URL` and
+    `SUPABASE_KEY` are set, backed by Supabase instead, so it survives the ephemeral
+    filesystem of a hosted deployment like Streamlit Community Cloud.
+    """
 
     def __init__(self, data_dir: str = DATA_DIR):
         self.data_dir = data_dir
         self.cache_path = os.path.join(data_dir, "merchant_cache.json")
         self.overrides_path = os.path.join(data_dir, "overrides.json")
-        self.cache: dict[str, dict] = _read_json(self.cache_path)
-        self.overrides: dict[str, str] = {
-            key: value for key, value in _read_json(self.overrides_path).items()
-            if isinstance(value, str)
-        }
+        self._client = None
+
+        if is_supabase_configured():
+            from supabase import create_client
+            self._client = create_client(
+                os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"]
+            )
+            overrides_rows = self._client.table("bankcat_overrides").select("*").execute()
+            self.overrides: dict[str, str] = {
+                row["merchant_key"]: row["category"] for row in overrides_rows.data
+            }
+            cache_rows = self._client.table("bankcat_cache").select("*").execute()
+            self.cache: dict[str, dict] = {
+                row["merchant_key"]: {
+                    "category": row["category"],
+                    "display": row["display"],
+                    "confidence": row["confidence"],
+                    "model": row["model"],
+                }
+                for row in cache_rows.data
+            }
+        else:
+            self.cache = _read_json(self.cache_path)
+            self.overrides = {
+                key: value for key, value in _read_json(self.overrides_path).items()
+                if isinstance(value, str)
+            }
 
     def set_override(self, merchant_key: str, category: str) -> None:
         key = make_key(merchant_key)
@@ -183,13 +216,24 @@ class Store:
             return
         if category == UNCATEGORISED:
             self.overrides.pop(key, None)
+            if self._client is not None:
+                self._client.table("bankcat_overrides").delete().eq(
+                    "merchant_key", key).execute()
         else:
             self.overrides[key] = category
-        _write_json(self.overrides_path, self.overrides)
+            if self._client is not None:
+                self._client.table("bankcat_overrides").upsert(
+                    {"merchant_key": key, "category": category}).execute()
+        if self._client is None:
+            _write_json(self.overrides_path, self.overrides)
 
     def clear_overrides(self) -> None:
         self.overrides = {}
-        _write_json(self.overrides_path, self.overrides)
+        if self._client is not None:
+            self._client.table("bankcat_overrides").delete().neq(
+                "merchant_key", "").execute()
+        else:
+            _write_json(self.overrides_path, self.overrides)
 
     def remember(self, merchant_key: str, category: str, display: str = "",
                  confidence: float = 0.8, model: str = "") -> None:
@@ -204,11 +248,19 @@ class Store:
         }
 
     def flush(self) -> None:
-        _write_json(self.cache_path, self.cache)
+        if self._client is not None:
+            if self.cache:
+                rows = [{"merchant_key": key, **value} for key, value in self.cache.items()]
+                self._client.table("bankcat_cache").upsert(rows).execute()
+        else:
+            _write_json(self.cache_path, self.cache)
 
     def clear_cache(self) -> None:
         self.cache = {}
-        _write_json(self.cache_path, self.cache)
+        if self._client is not None:
+            self._client.table("bankcat_cache").delete().neq("merchant_key", "").execute()
+        else:
+            _write_json(self.cache_path, self.cache)
 
 
 # --------------------------------------------------------------------------------------
