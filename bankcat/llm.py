@@ -1,4 +1,4 @@
-"""Ask Claude to categorise merchants the rule dictionary did not recognise.
+"""Ask Claude or OpenAI to categorise merchants the rule dictionary did not recognise.
 
 This is layer 5 of the categoriser and it is entirely optional. It runs only on merchants
 that layers 1-4 could not resolve, batches them into a handful of requests, and writes
@@ -19,10 +19,18 @@ from pydantic import BaseModel, Field
 
 from .categorize import CATEGORIES, UNCATEGORISED
 
-# Change this one line to trade accuracy for cost. claude-haiku-4-5 is cheaper and
-# usually fine for merchant naming; claude-opus-5 is the most accurate on the ambiguous
-# Indian narrations that reach this layer at all.
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_OPENAI = "openai"
+PROVIDER_DISPLAY = {PROVIDER_ANTHROPIC: "Claude", PROVIDER_OPENAI: "OpenAI"}
+
+# Change this one line to trade accuracy for cost on the Anthropic path. claude-haiku-4-5
+# is cheaper and usually fine for merchant naming; claude-opus-5 is the most accurate on
+# the ambiguous Indian narrations that reach this layer at all.
 MODEL = "claude-opus-5"
+
+# OpenAI model for this layer, used only when OpenAI is the active provider. Override with
+# OPENAI_MODEL if this default no longer matches what's available on your account.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 BATCH_SIZE = 40
 MAX_BATCHES = 10  # safety valve: never fire more than this many requests in one load
@@ -92,25 +100,93 @@ class LabelBatch(BaseModel):
 
 
 class LLMUnavailable(Exception):
-    """Raised when Claude cannot be reached. Callers degrade instead of failing."""
+    """Raised when the configured LLM provider cannot be reached. Callers degrade
+    instead of failing."""
+
+
+def active_provider() -> str | None:
+    """Which provider a client-less call will use.
+
+    An explicit BANKCAT_LLM_PROVIDER override wins outright. Otherwise Anthropic wins
+    when both are configured, since it's bankcat's original/default provider; OpenAI is
+    used when only its key is present. None when neither is configured.
+    """
+    override = os.environ.get("BANKCAT_LLM_PROVIDER", "").strip().lower()
+    if override in PROVIDER_DISPLAY:
+        return override
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return PROVIDER_ANTHROPIC
+    if os.environ.get("OPENAI_API_KEY"):
+        return PROVIDER_OPENAI
+    return None
 
 
 def is_configured() -> bool:
-    """True when an API key is present in the environment."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    """True when at least one supported provider's API key is present."""
+    return active_provider() is not None
 
 
-def get_client():
-    """Build an Anthropic client, or raise LLMUnavailable."""
+def active_model() -> str | None:
+    """Model id a client-less call will use, or None if nothing is configured."""
+    provider = active_provider()
+    if provider == PROVIDER_ANTHROPIC:
+        return MODEL
+    if provider == PROVIDER_OPENAI:
+        return OPENAI_MODEL
+    return None
+
+
+def provider_display_name(provider: str | None) -> str:
+    """Human label for a provider key, for UI text."""
+    return PROVIDER_DISPLAY.get(provider, "an AI provider")
+
+
+def label_for_model(model: str) -> str:
+    """Best-effort human label for a *stored* model id (e.g. from the merchant cache).
+
+    Prefix-matched, not exact-matched against MODEL/OPENAI_MODEL, because a cache entry
+    may have been written under a model value that has since changed.
+    """
+    if not model:
+        return "AI"
+    lowered = model.lower()
+    if lowered.startswith("claude"):
+        return "Claude"
+    if lowered.startswith(("gpt", "chatgpt", "o1", "o3", "o4", "o5")):
+        return "OpenAI"
+    return "AI"
+
+
+def get_client(provider: str | None = None):
+    """Build a client for `provider` (or the active one), or raise LLMUnavailable."""
+    provider = provider or active_provider()
+    if provider == PROVIDER_OPENAI:
+        return _get_openai_client()
+    if provider == PROVIDER_ANTHROPIC:
+        return _get_anthropic_client()
+    raise LLMUnavailable("No LLM provider is configured.")
+
+
+def _get_anthropic_client():
     try:
         import anthropic
     except ImportError as error:
         raise LLMUnavailable("The `anthropic` package is not installed.") from error
-
     try:
         return anthropic.Anthropic()
     except Exception as error:
         raise LLMUnavailable(f"Could not create an Anthropic client: {error}") from error
+
+
+def _get_openai_client():
+    try:
+        import openai
+    except ImportError as error:
+        raise LLMUnavailable("The `openai` package is not installed.") from error
+    try:
+        return openai.OpenAI()
+    except Exception as error:
+        raise LLMUnavailable(f"Could not create an OpenAI client: {error}") from error
 
 
 def _format_batch(items: list[dict]) -> str:
@@ -129,66 +205,120 @@ def _format_batch(items: list[dict]) -> str:
     )
 
 
-def classify_merchants(items: Iterable[dict], client=None) -> dict[str, dict]:
+def classify_merchants(items: Iterable[dict], client=None,
+                        provider: str | None = None) -> dict[str, dict]:
     """Categorise unresolved merchants. Returns ``{key: {category, display, ...}}``.
 
     Never raises: any failure returns whatever was resolved so far, so an API outage
     degrades the app to rules-only rather than breaking the upload.
+
+    ``provider`` picks the call shape ("anthropic" or "openai"). When ``client`` is given
+    directly and ``provider`` is not, it defaults to "anthropic" — the behaviour every
+    existing caller relies on. When ``client`` is None, the active provider (see
+    `active_provider`) is used and its client is built here.
     """
     pending = [item for item in items if item.get("key")]
     if not pending:
         return {}
 
     if client is None:
-        if not is_configured():
+        provider = provider or active_provider()
+        if provider is None:
             return {}
         try:
-            client = get_client()
+            client = get_client(provider)
         except LLMUnavailable:
             return {}
+    elif provider is None:
+        provider = PROVIDER_ANTHROPIC
+    else:
+        provider = provider.lower()
+
+    classify_batch = _BATCH_CLASSIFIERS.get(provider)
+    if classify_batch is None:
+        return {}
 
     resolved: dict[str, dict] = {}
     batches = [pending[i:i + BATCH_SIZE] for i in range(0, len(pending), BATCH_SIZE)]
 
     for batch in batches[:MAX_BATCHES]:
         try:
-            response = client.messages.parse(
-                model=MODEL,
-                max_tokens=8000,
-                output_config={"effort": "low"},
-                system=[{
-                    "type": "text",
-                    "text": TAXONOMY_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-                messages=[{"role": "user", "content": _format_batch(batch)}],
-                output_format=LabelBatch,
-            )
+            resolved.update(classify_batch(client, batch))
         except Exception as error:
             # Specific-first so the caller's message is useful, but never fatal.
-            _log_api_failure(error)
+            _log_api_failure(error, provider)
             break
-
-        parsed = getattr(response, "parsed_output", None)
-        if parsed is None:
-            continue
-
-        valid_keys = {item["key"] for item in batch}
-        for label in parsed.labels:
-            if label.key not in valid_keys or label.category not in _VALID:
-                continue
-            resolved[label.key] = {
-                "category": label.category,
-                "display": label.display,
-                "confidence": float(label.confidence),
-                "model": MODEL,
-            }
 
     return resolved
 
 
-def _log_api_failure(error: Exception) -> None:
+def _valid_labels(parsed, batch: list[dict]) -> dict[str, dict]:
+    """Shared validation: echo-key + category membership check, provider-agnostic."""
+    if parsed is None:
+        return {}
+    valid_keys = {item["key"] for item in batch}
+    out = {}
+    for label in parsed.labels:
+        if label.key not in valid_keys or label.category not in _VALID:
+            continue
+        out[label.key] = {
+            "category": label.category,
+            "display": label.display,
+            "confidence": float(label.confidence),
+        }
+    return out
+
+
+def _classify_batch_anthropic(client, batch: list[dict]) -> dict[str, dict]:
+    response = client.messages.parse(
+        model=MODEL,
+        max_tokens=8000,
+        output_config={"effort": "low"},
+        system=[{
+            "type": "text",
+            "text": TAXONOMY_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }],
+        messages=[{"role": "user", "content": _format_batch(batch)}],
+        output_format=LabelBatch,
+    )
+    resolved = _valid_labels(getattr(response, "parsed_output", None), batch)
+    for value in resolved.values():
+        value["model"] = MODEL
+    return resolved
+
+
+def _classify_batch_openai(client, batch: list[dict]) -> dict[str, dict]:
+    response = client.responses.parse(
+        model=OPENAI_MODEL,
+        max_output_tokens=8000,
+        input=[
+            {"role": "system", "content": TAXONOMY_PROMPT},
+            {"role": "user", "content": _format_batch(batch)},
+        ],
+        text_format=LabelBatch,
+    )
+    resolved = _valid_labels(getattr(response, "output_parsed", None), batch)
+    for value in resolved.values():
+        value["model"] = OPENAI_MODEL
+    return resolved
+
+
+_BATCH_CLASSIFIERS = {
+    PROVIDER_ANTHROPIC: _classify_batch_anthropic,
+    PROVIDER_OPENAI: _classify_batch_openai,
+}
+
+
+def _log_api_failure(error: Exception, provider: str = PROVIDER_ANTHROPIC) -> None:
     """Turn an SDK exception into one readable line. Diagnostics only — never raises."""
+    if provider == PROVIDER_OPENAI:
+        _log_openai_failure(error)
+    else:
+        _log_anthropic_failure(error)
+
+
+def _log_anthropic_failure(error: Exception) -> None:
     try:
         import anthropic
     except ImportError:
@@ -206,3 +336,23 @@ def _log_api_failure(error: Exception) -> None:
     else:
         message = str(error)
     print(f"[bankcat] Claude fallback skipped ({message}). Using rules only.")
+
+
+def _log_openai_failure(error: Exception) -> None:
+    try:
+        import openai
+    except ImportError:
+        print(f"[bankcat] OpenAI unavailable: {error}")
+        return
+
+    if isinstance(error, openai.AuthenticationError):
+        message = "invalid or missing OPENAI_API_KEY"
+    elif isinstance(error, openai.RateLimitError):
+        message = "rate limited — try again shortly"
+    elif isinstance(error, openai.APIConnectionError):
+        message = "network unreachable"
+    elif isinstance(error, openai.APIStatusError):
+        message = f"API error {error.status_code}: {error.message}"
+    else:
+        message = str(error)
+    print(f"[bankcat] OpenAI fallback skipped ({message}). Using rules only.")

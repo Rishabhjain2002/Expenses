@@ -71,6 +71,7 @@ def main() -> int:
     check("transfers excluded note", "excluded as transfers" in body)
 
     headings = [element.value for element in app.markdown if element.value.startswith("###")]
+    headings += [expander.label for expander in app.expander]
     for heading in ("Where the money went", "Month by month", "Top merchants",
                     "Daily spending", "Recurring payments and subscriptions"):
         check(f"section: {heading}", any(heading in h for h in headings))

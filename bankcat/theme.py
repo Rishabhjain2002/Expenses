@@ -40,6 +40,17 @@ WARNING = "#fab219"
 
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
+# Shared config for every st.plotly_chart(...) call: hover tooltips stay on, but there is
+# no toolbar, no scroll/pinch zoom, and no double-click reset to fight with on mobile.
+PLOTLY_CONFIG = {
+    "displayModeBar": False,
+    "displaylogo": False,
+    "scrollZoom": False,
+    "doubleClick": False,
+    "showAxisDragHandles": False,
+    "showTips": False,
+}
+
 
 def series_colors(count: int) -> list[str]:
     """Colours for ``count`` series, capped at the eight validated slots."""
@@ -63,14 +74,17 @@ def style(figure, height: int = 320, show_legend: bool = False, y_prefix: str = 
             bgcolor=SURFACE, bordercolor=AXIS, font=dict(family=FONT, size=12, color=INK)
         ),
         bargap=0.25,
+        dragmode=False,
     )
     figure.update_xaxes(
         showgrid=False, zeroline=False, linecolor=AXIS, ticks="outside",
         tickcolor=AXIS, ticklen=4, tickfont=dict(color=MUTED, size=11),
+        fixedrange=True,
     )
     figure.update_yaxes(
         showgrid=True, gridcolor=GRID, gridwidth=1, zeroline=False,
         showline=False, tickfont=dict(color=MUTED, size=11), tickprefix=y_prefix,
+        fixedrange=True,
     )
     return figure
 

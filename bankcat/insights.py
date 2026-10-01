@@ -6,6 +6,8 @@ and returns tables ready to chart.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from .categorize import NOT_SPENDING
@@ -19,6 +21,9 @@ _CADENCES = [
     ("Half-yearly", 175, 190),
     ("Yearly", 355, 375),
 ]
+
+# Mean Gregorian month. Used to project a burn rate from an arbitrary span of days.
+DAYS_PER_MONTH = 30.44
 
 
 def spending(frame: pd.DataFrame, include_transfers: bool = False) -> pd.DataFrame:
@@ -43,8 +48,89 @@ def income(frame: pd.DataFrame) -> pd.DataFrame:
     return frame[(frame["credit"] > 0) & (frame["category"] != "Transfers")]
 
 
-def headline(frame: pd.DataFrame, include_transfers: bool = False) -> dict:
-    """The KPI row."""
+def statement_span(frame: pd.DataFrame) -> tuple[date, date] | tuple[None, None]:
+    """Earliest and latest transaction date, as plain dates for a date picker."""
+    if frame.empty:
+        return None, None
+    return frame["date"].min().date(), frame["date"].max().date()
+
+
+def filter_period(frame: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Rows between ``start`` and ``end``, both ends inclusive.
+
+    Compares on normalised dates. Dates arrive date-only on every normal parse path, but
+    the mixed-format fallback can leave a time component, which would drop the final
+    day's rows from a naive ``<= end`` comparison.
+    """
+    if frame.empty:
+        return frame
+    days = frame["date"].dt.normalize()
+    window = (days >= pd.Timestamp(start)) & (days <= pd.Timestamp(end))
+    return frame[window].reset_index(drop=True)
+
+
+def period_summary(full_frame: pd.DataFrame, start: date, end: date,
+                   include_transfers: bool = False) -> dict:
+    """Everything the period band shows, for the range ``start``–``end``.
+
+    Takes the *unfiltered* frame because the opening balance is carried by the last
+    transaction before the range, which the filtered view by definition excludes.
+    """
+    view = filter_period(full_frame, start, end)
+    days = (end - start).days + 1
+    summary = headline(view, include_transfers, period_days=days)
+    summary.update({
+        "days": days,
+        "credits": int((view["credit"].fillna(0.0) > 0).sum()) if not view.empty else 0,
+        "debits": int((view["debit"].fillna(0.0) > 0).sum()) if not view.empty else 0,
+        "total": int(len(full_frame)),
+        "opening_balance": None,
+        "closing_balance": None,
+        "balance_change": None,
+    })
+    summary.update(_period_balances(full_frame, view, start))
+    return summary
+
+
+def _period_balances(full_frame: pd.DataFrame, view: pd.DataFrame, start: date) -> dict:
+    """Opening and closing running balance for a period, when they are meaningful.
+
+    Returns empty when the balance cannot be trusted: more than one source file means
+    several accounts' running balances interleaved, and the column is often sparse
+    because blank cells parse to NaN.
+    """
+    blank = {}
+    if view.empty or full_frame["source_file"].nunique() != 1:
+        return blank
+
+    in_range = view.dropna(subset=["balance"])
+    if in_range.empty:
+        return blank
+    closing = float(in_range.iloc[-1]["balance"])
+
+    before = full_frame[full_frame["date"].dt.normalize() < pd.Timestamp(start)]
+    before = before.dropna(subset=["balance"])
+    if not before.empty:
+        opening = float(before.iloc[-1]["balance"])
+    else:
+        # The range starts at the first transaction, so undo it to get the balance
+        # the statement opened on.
+        first = in_range.iloc[0]
+        opening = (float(first["balance"])
+                   - float(first["credit"] or 0.0) + float(first["debit"] or 0.0))
+
+    return {"opening_balance": opening, "closing_balance": closing,
+            "balance_change": closing - opening}
+
+
+def headline(frame: pd.DataFrame, include_transfers: bool = False,
+             period_days: int | None = None) -> dict:
+    """The KPI row.
+
+    ``period_days`` is the length of the selected range. Given it, the burn rate is
+    projected from elapsed days rather than divided by the count of calendar months
+    present — the latter is badly wrong for any range that is not whole months.
+    """
     if frame.empty:
         return {
             "money_in": 0.0, "money_out": 0.0, "net": 0.0, "monthly_burn": 0.0,
@@ -59,6 +145,7 @@ def headline(frame: pd.DataFrame, include_transfers: bool = False) -> dict:
 
     start, end = frame["date"].min(), frame["date"].max()
     months = max(1, len(frame["date"].dt.to_period("M").unique()))
+    burn_months = (period_days / DAYS_PER_MONTH) if period_days else months
 
     largest = None
     if not out_frame.empty:
@@ -70,7 +157,7 @@ def headline(frame: pd.DataFrame, include_transfers: bool = False) -> dict:
         "money_in": money_in,
         "money_out": money_out,
         "net": money_in - money_out,
-        "monthly_burn": money_out / months,
+        "monthly_burn": money_out / burn_months,
         "transactions": int(len(frame)),
         "months": months,
         "start": start,

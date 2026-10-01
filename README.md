@@ -46,10 +46,10 @@ Five layers. The first one that recognises a transaction wins.
 | | Layer | What it is |
 |---|---|---|
 | 1 | Your tags | Categories you set in the app. Always win, never overwritten. |
-| 2 | Learned | What Claude answered before. Each merchant costs one API call, ever. |
+| 2 | Learned | What the AI layer answered before. Each merchant costs one API call, ever. |
 | 3 | Rules | ~500 India-specific merchant patterns in `bankcat/rules.yaml`. Free and instant. |
 | 4 | Heuristics | ATM → Cash, bank charges → Fees, interest → Income, unexplained credits → Income. |
-| 5 | Claude | Only merchants layers 1–4 could not place. Batched, then cached forever. |
+| 5 | AI fallback | Only merchants layers 1–4 could not place — Claude or OpenAI, whichever is configured. Batched, then cached forever. |
 
 Layers 1–4 need no internet and no API key. On the sample statement they cover **100% of
 transaction value** on their own.
@@ -72,15 +72,19 @@ Two ways, and both stick permanently:
   merchant name and the raw narration. When several match, the longest wins — so
   `amazon prime` lands in Entertainment even though `amazon` is under Shopping.
 
-### The optional Claude layer
+### The optional AI layer
 
-Set `ANTHROPIC_API_KEY` and unknown merchants get sent to Claude, named, categorised, and
-remembered. Without a key, everything else still works and unknowns go to the review list
+Set `ANTHROPIC_API_KEY` (for Claude) or `OPENAI_API_KEY` (for OpenAI) and unknown
+merchants get sent to that provider, named, categorised, and remembered. If both are set,
+Claude is used by default — set `BANKCAT_LLM_PROVIDER=openai` to prefer OpenAI instead.
+Without either key, everything else still works and unknowns go to the review list
 instead.
 
 Only merchant name strings and their narrations are sent — never amounts, balances, or
-account numbers. Change the model in one line at the top of `bankcat/llm.py` if you want
-`claude-haiku-4-5` instead.
+account numbers. Change the Claude model in one line at the top of `bankcat/llm.py` if you
+want `claude-haiku-4-5` instead; the OpenAI model is set via the `OPENAI_MODEL`
+environment variable (default `gpt-4o-mini` — check OpenAI's current model lineup before
+relying on this default).
 
 ## Working through a statement
 
@@ -112,11 +116,11 @@ bankcat/
   normalize.py            narration -> merchant, channel, UPI handle
   rules.yaml              the merchant dictionary — edit this to teach it
   categorize.py           the five layers
-  llm.py                  the Claude fallback
+  llm.py                  the Claude / OpenAI fallback
   insights.py             rollups and recurring-payment detection
   theme.py                chart palette and formatting
 data/
-  merchant_cache.json     learned from Claude — back this up
+  merchant_cache.json     learned from the AI layer — back this up
   overrides.json          your own tags — back this up
 samples/make_sample.py    generates test statements with known totals
 tests/                    run them all with `python run_tests.py`
@@ -131,5 +135,6 @@ python run_tests.py
 ```
 
 Covers parsing all four sample formats against known totals, merchant extraction on real
-Indian narration formats, end-to-end categorisation, the Claude layer (with a stub client,
-so it needs no API key), and a headless render of the dashboard itself.
+Indian narration formats, end-to-end categorisation, the LLM layer for both Claude and
+OpenAI (with stub clients, so it needs no API key), and a headless render of the dashboard
+itself.

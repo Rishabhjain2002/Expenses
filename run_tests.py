@@ -1,4 +1,4 @@
-"""Run every check: parsers, merchant extraction, categorisation, Claude layer, and UI.
+"""Run every check: parsers, merchant extraction, categorisation, LLM layer, and UI.
 
     python run_tests.py
 """
@@ -15,7 +15,8 @@ SUITES = [
     ("Merchants    ", "tests/test_normalize.py"),
     ("Pipeline     ", "tests/test_pipeline.py"),
     ("Kotak layout ", "tests/test_kotak.py"),
-    ("Claude layer ", "tests/test_llm.py"),
+    ("LLM (Claude) ", "tests/test_llm.py"),
+    ("LLM (OpenAI) ", "tests/test_llm_openai.py"),
     ("App / UI     ", "tests/test_app.py"),
 ]
 

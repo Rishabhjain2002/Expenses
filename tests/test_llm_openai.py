@@ -1,10 +1,9 @@
-"""Exercise the Claude fallback without an API key, using a stub client.
+"""Exercise the OpenAI fallback without an API key, using a stub client.
 
-Checks the request shape (model, structured output, cached system prefix), that answers
-are applied and persisted, and — most importantly — that every failure mode degrades to
-rules-only instead of breaking the upload.
+Mirrors test_llm.py's Anthropic coverage: request shape, answers applied and persisted,
+every failure mode degrading to rules-only, and provider selection precedence.
 
-    python tests/test_llm.py
+    python tests/test_llm_openai.py
 """
 
 from __future__ import annotations
@@ -34,8 +33,8 @@ def check(label: str, condition: bool, detail: str = "") -> None:
         failures.append(label)
 
 
-class StubMessages:
-    """Stands in for client.messages, recording how it was called."""
+class StubResponses:
+    """Stands in for client.responses, recording how it was called."""
 
     def __init__(self, answers: dict[str, str], fail_with: Exception | None = None):
         self.answers = answers
@@ -47,7 +46,7 @@ class StubMessages:
         if self.fail_with:
             raise self.fail_with
 
-        prompt = kwargs["messages"][0]["content"]
+        prompt = kwargs["input"][-1]["content"]
         labels = [
             llm.MerchantLabel(key=key, display=key.title(), category=category,
                               confidence=0.93)
@@ -56,18 +55,18 @@ class StubMessages:
         ]
 
         class Response:
-            parsed_output = llm.LabelBatch(labels=labels)
+            output_parsed = llm.LabelBatch(labels=labels)
 
         return Response()
 
 
-class StubClient:
+class StubOpenAIClient:
     def __init__(self, answers, fail_with=None):
-        self.messages = StubMessages(answers, fail_with)
+        self.responses = StubResponses(answers, fail_with)
 
 
 def sample_frame() -> pd.DataFrame:
-    """Two merchants no rule in rules.yaml can match."""
+    """Two merchants no rule in rules.yaml can match — same fixture as test_llm.py."""
     return pd.DataFrame([
         {"date": pd.Timestamp("2025-04-03"), "source_file": "t.csv", "balance": 9000.0,
          "description": "UPI/DR/412345678901/QUIKRWALLS/YESB/quikrwalls@ybl/Payment",
@@ -81,51 +80,43 @@ def sample_frame() -> pd.DataFrame:
 def main() -> int:
     frame = sample_frame()
 
-    print("Unresolved before Claude")
-    with tempfile.TemporaryDirectory() as scratch:
-        baseline = Categorizer(store=Store(data_dir=scratch)).categorize(frame, use_llm=False)
-    unresolved = set(baseline.loc[baseline["category"] == UNCATEGORISED, "merchant_key"])
-    check("both merchants unresolved by rules", len(unresolved) == 2,
-          f"{sorted(unresolved)}")
-
-    print("\nRequest shape")
+    print("Request shape")
     answers = {"quikrwalls": "Shopping", "snitch apparel bangalore": "Shopping"}
-    client = StubClient(answers)
+    client = StubOpenAIClient(answers)
     with tempfile.TemporaryDirectory() as scratch:
         store = Store(data_dir=scratch)
-        result = Categorizer(store=store).categorize(frame, use_llm=True, llm_client=client)
+        result = Categorizer(store=store).categorize(
+            frame, use_llm=True, llm_client=client, llm_provider="openai")
 
-        call = client.messages.calls[0] if client.messages.calls else {}
-        check("one batched request for two merchants", len(client.messages.calls) == 1,
-              f"{len(client.messages.calls)} call(s)")
-        check("uses the configured model", call.get("model") == llm.MODEL,
+        call = client.responses.calls[0] if client.responses.calls else {}
+        check("one batched request for two merchants", len(client.responses.calls) == 1,
+              f"{len(client.responses.calls)} call(s)")
+        check("uses the configured model", call.get("model") == llm.OPENAI_MODEL,
               str(call.get("model")))
-        check("uses structured output", call.get("output_format") is llm.LabelBatch)
-        system = call.get("system") or [{}]
-        check("system prefix is cached",
-              system[0].get("cache_control", {}).get("type") == "ephemeral")
-        check("system prefix is the frozen taxonomy",
-              system[0].get("text") == llm.TAXONOMY_PROMPT)
-        check("no amounts in the system prefix", "2400" not in str(system))
+        check("uses structured output", call.get("text_format") is llm.LabelBatch)
+        input_messages = call.get("input") or [{}]
+        check("system prompt is the frozen taxonomy",
+              input_messages[0].get("content") == llm.TAXONOMY_PROMPT)
+        check("no amounts in the request", "2400" not in str(input_messages))
 
         print("\nAnswers applied and remembered")
         check("both rows categorised",
               int((result["category"] == UNCATEGORISED).sum()) == 0,
               f"{int((result['category'] == UNCATEGORISED).sum())} left")
-        check("tagged as coming from Claude",
+        check("tagged as coming from the LLM layer",
               bool((result["category_source"] == "llm").all()),
               str(result["category_source"].tolist()))
         check("written to the cache", set(answers) <= set(store.cache),
               str(sorted(store.cache)))
-        check("cache persisted to disk",
-              os.path.exists(os.path.join(scratch, "merchant_cache.json")))
+        check("cache records the openai model",
+              all(store.cache[k]["model"] == llm.OPENAI_MODEL for k in answers))
 
         print("\nSecond run uses the cache, not the API")
-        client2 = StubClient(answers)
+        client2 = StubOpenAIClient(answers)
         again = Categorizer(store=Store(data_dir=scratch)).categorize(
-            frame, use_llm=True, llm_client=client2)
-        check("no API call on the second run", len(client2.messages.calls) == 0,
-              f"{len(client2.messages.calls)} call(s)")
+            frame, use_llm=True, llm_client=client2, llm_provider="openai")
+        check("no API call on the second run", len(client2.responses.calls) == 0,
+              f"{len(client2.responses.calls)} call(s)")
         check("still categorised from cache",
               bool((again["category_source"] == "cache").all()),
               str(again["category_source"].tolist()))
@@ -136,26 +127,34 @@ def main() -> int:
         ("unexpected error", RuntimeError("boom")),
     ]:
         with tempfile.TemporaryDirectory() as scratch:
-            broken = StubClient({}, fail_with=error)
+            broken = StubOpenAIClient({}, fail_with=error)
             try:
                 degraded = Categorizer(store=Store(data_dir=scratch)).categorize(
-                    frame, use_llm=True, llm_client=broken)
+                    frame, use_llm=True, llm_client=broken, llm_provider="openai")
                 ok = int((degraded["category"] == UNCATEGORISED).sum()) == 2
                 check(f"{label} degrades to rules-only", ok)
             except Exception as raised:  # noqa: BLE001
                 check(f"{label} degrades to rules-only", False,
                       f"raised {type(raised).__name__}: {raised}")
 
-    print("\nNo API key configured")
+    print("\nProvider selection")
     saved = {k: os.environ.pop(k, None) for k in
-             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY")}
+             ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY",
+              "BANKCAT_LLM_PROVIDER")}
     try:
-        check("is_configured() is False", llm.is_configured() is False)
-        check("classify_merchants returns nothing",
-              llm.classify_merchants([{"key": "quikrwalls", "merchant": "Quikrwalls",
-                                       "narration": "x", "channel": "UPI",
-                                       "direction": "debit"}]) == {})
+        check("nothing configured -> is_configured() False", llm.is_configured() is False)
+        os.environ["OPENAI_API_KEY"] = "sk-test-fake"
+        check("only an OpenAI key -> active_provider() is openai",
+              llm.active_provider() == "openai")
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test-fake"
+        check("both keys configured -> anthropic wins by default",
+              llm.active_provider() == "anthropic")
+        os.environ["BANKCAT_LLM_PROVIDER"] = "openai"
+        check("BANKCAT_LLM_PROVIDER override forces openai",
+              llm.active_provider() == "openai")
     finally:
+        for key in list(saved):
+            os.environ.pop(key, None)
         for key, value in saved.items():
             if value is not None:
                 os.environ[key] = value

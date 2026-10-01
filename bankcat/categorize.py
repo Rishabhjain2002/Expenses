@@ -3,10 +3,11 @@
 Five layers, checked in order; the first one that resolves a transaction wins:
 
     1. overrides.json      what you tagged by hand — always wins, never overwritten
-    2. merchant_cache.json what Claude answered before — one API call per merchant, ever
+    2. merchant_cache.json what the LLM layer answered before — one API call per merchant
     3. rules.yaml          the India merchant dictionary — free, instant, deterministic
     4. heuristics          channel-driven fallbacks (ATM, charges, interest, credits)
-    5. Claude              unresolved merchants only, batched, written back to the cache
+    5. LLM fallback        unresolved merchants only, batched, written back to the cache
+                           (Claude or OpenAI, whichever is configured)
 
 Layers 1-4 need no network and no API key. Layer 5 is optional; without it, unresolved
 transactions land in the review queue instead of being guessed at.
@@ -51,6 +52,12 @@ CATEGORIES = [
 
 UNCATEGORISED = "Uncategorised"
 
+
+def all_categories(custom: list[str]) -> list[str]:
+    """Built-in categories plus any user-added ones, with Uncategorised always last."""
+    extra = [c for c in custom if c not in CATEGORIES]
+    return CATEGORIES[:-1] + extra + [UNCATEGORISED]
+
 # Money that leaves the account but is not consumption: moving it between your own
 # accounts, paying off a card whose purchases are already itemised elsewhere, or buying
 # an asset. Counting these as spending is the classic way to overstate a burn rate.
@@ -70,7 +77,7 @@ SOURCE_LABELS = {
     "cache": "Learned",
     "rule": "Rule",
     "heuristic": "Heuristic",
-    "llm": "Claude",
+    "llm": "AI",
     "none": "Unresolved",
 }
 
@@ -170,8 +177,8 @@ def is_supabase_configured() -> bool:
 
 
 class Store:
-    """What you tagged and what Claude has learned — the reason month two is smarter
-    than month one.
+    """What you tagged and what the LLM layer has learned — the reason month two is
+    smarter than month one.
 
     Backed by local JSON files (`data/`) by default. When `SUPABASE_URL` and
     `SUPABASE_KEY` are set, backed by Supabase instead, so it survives the ephemeral
@@ -182,6 +189,7 @@ class Store:
         self.data_dir = data_dir
         self.cache_path = os.path.join(data_dir, "merchant_cache.json")
         self.overrides_path = os.path.join(data_dir, "overrides.json")
+        self.categories_path = os.path.join(data_dir, "custom_categories.json")
         self._client = None
 
         if is_supabase_configured():
@@ -203,12 +211,18 @@ class Store:
                 }
                 for row in cache_rows.data
             }
+            category_rows = self._client.table("bankcat_categories").select("*").execute()
+            self.custom_categories: list[str] = [row["name"] for row in category_rows.data]
         else:
             self.cache = _read_json(self.cache_path)
             self.overrides = {
                 key: value for key, value in _read_json(self.overrides_path).items()
                 if isinstance(value, str)
             }
+            self.custom_categories = [
+                name for name in _read_json(self.categories_path).get("categories", [])
+                if isinstance(name, str)
+            ]
 
     def set_override(self, merchant_key: str, category: str) -> None:
         key = make_key(merchant_key)
@@ -262,6 +276,21 @@ class Store:
         else:
             _write_json(self.cache_path, self.cache)
 
+    def add_category(self, name: str) -> bool:
+        """Add a user-defined category. Returns False for an empty or duplicate name."""
+        name = name.strip()
+        if not name:
+            return False
+        existing = {c.lower() for c in CATEGORIES} | {c.lower() for c in self.custom_categories}
+        if name.lower() in existing:
+            return False
+        self.custom_categories.append(name)
+        if self._client is not None:
+            self._client.table("bankcat_categories").upsert({"name": name}).execute()
+        else:
+            _write_json(self.categories_path, {"categories": self.custom_categories})
+        return True
+
 
 # --------------------------------------------------------------------------------------
 # The categoriser
@@ -309,7 +338,7 @@ class Categorizer:
     # -- orchestration -----------------------------------------------------------------
 
     def categorize(self, frame: pd.DataFrame, use_llm: bool = True,
-                   llm_client=None) -> pd.DataFrame:
+                   llm_client=None, llm_provider: str | None = None) -> pd.DataFrame:
         """Return ``frame`` with category, category_source, and confidence columns."""
         if frame.empty:
             result = frame.copy()
@@ -333,7 +362,7 @@ class Categorizer:
         result["confidence"] = confidences
 
         if use_llm:
-            result = self._fill_with_llm(result, llm_client)
+            result = self._fill_with_llm(result, llm_client, llm_provider)
 
         return result
 
@@ -348,7 +377,7 @@ class Categorizer:
         if override:
             return CategoryResult(override, "override", 1.0)
 
-        # 2 — what Claude told us before
+        # 2 — what the LLM told us before
         cached = self.store.cache.get(merchant_key)
         if cached and cached.get("category") in CATEGORIES:
             return CategoryResult(cached["category"], "cache",
@@ -374,8 +403,10 @@ class Categorizer:
 
     # -- layer 5 -----------------------------------------------------------------------
 
-    def _fill_with_llm(self, frame: pd.DataFrame, llm_client=None) -> pd.DataFrame:
-        """Send unresolved merchants to Claude, then apply and persist the answers."""
+    def _fill_with_llm(self, frame: pd.DataFrame, llm_client=None,
+                       llm_provider: str | None = None) -> pd.DataFrame:
+        """Send unresolved merchants to the configured LLM provider, then apply and
+        persist the answers."""
         from . import llm as llm_module
 
         pending = frame[frame["category"] == UNCATEGORISED]
@@ -403,7 +434,8 @@ class Categorizer:
         if not samples:
             return frame
 
-        labels = llm_module.classify_merchants(list(samples.values()), client=llm_client)
+        labels = llm_module.classify_merchants(
+            list(samples.values()), client=llm_client, provider=llm_provider)
         if not labels:
             return frame
 
@@ -458,20 +490,70 @@ def coverage(frame: pd.DataFrame) -> dict:
     }
 
 
-def needs_review(frame: pd.DataFrame, confidence_floor: float = 0.7) -> pd.DataFrame:
-    """Transactions worth a human glance, largest first.
+REVIEW_SORT_COLUMNS = {
+    "amount": "_amount",
+    "date": "date",
+    "merchant": "merchant",
+    "confidence": "confidence",
+}
 
-    Sorted by amount because fixing the ten biggest fixes the totals; a mislabelled
-    ₹40 coffee changes nothing.
+
+def needs_review(
+    frame: pd.DataFrame,
+    confidence_floor: float = 0.7,
+    sort_by: str = "amount",
+    ascending: bool = False,
+    reason: str = "all",
+) -> pd.DataFrame:
+    """Transactions worth a human glance.
+
+    By default, sorted by amount (largest first) because fixing the ten biggest fixes
+    the totals; a mislabelled ₹40 coffee changes nothing. ``sort_by``/``ascending`` let
+    the caller pick a different order, and ``reason`` narrows *why* a row is suspect:
+    ``"uncategorised"`` (no category matched at all), ``"low_confidence"`` (matched, but
+    not confidently), or ``"all"`` (either — the default).
     """
     if frame.empty:
         return frame
 
     amounts = frame["debit"].fillna(0.0) + frame["credit"].fillna(0.0)
-    suspect = (
-        (frame["category"] == UNCATEGORISED)
-        | ((frame["confidence"] < confidence_floor) & (frame["category_source"] != "override"))
+    uncategorised = frame["category"] == UNCATEGORISED
+    low_confidence = (frame["confidence"] < confidence_floor) & (
+        frame["category_source"] != "override"
     )
+    suspect = {
+        "uncategorised": uncategorised,
+        "low_confidence": low_confidence,
+        "all": uncategorised | low_confidence,
+    }[reason]
+
     review = frame[suspect].copy()
     review["_amount"] = amounts[suspect]
-    return review.sort_values("_amount", ascending=False).drop(columns=["_amount"])
+    column = REVIEW_SORT_COLUMNS.get(sort_by, "_amount")
+    review = review.sort_values(column, ascending=ascending, kind="mergesort")
+    return review.drop(columns=["_amount"])
+
+
+def decided_by_labels(frame: pd.DataFrame, store: "Store") -> pd.Series:
+    """Human-readable "who decided this" text for the "Decided by" UI column and export.
+
+    override/rule/heuristic/none use the static SOURCE_LABELS text. cache/llm rows —
+    anything an LLM ever answered, this run or a previous one — are labelled with the
+    actual provider that answered, read back from the persisted cache's `model` field, so
+    a history mixing Claude and OpenAI answers (e.g. after switching providers) is shown
+    accurately instead of naming one provider for everything.
+    """
+    from . import llm as llm_module
+
+    def label(source: str, merchant_key: str) -> str:
+        prefix = SOURCE_LABELS.get(source, source)
+        if source in ("cache", "llm"):
+            model = store.cache.get(merchant_key, {}).get("model", "")
+            if model:
+                return f"{prefix} ({llm_module.label_for_model(model)})"
+        return prefix
+
+    return pd.Series(
+        [label(s, k) for s, k in zip(frame["category_source"], frame["merchant_key"])],
+        index=frame.index,
+    )
